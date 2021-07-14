@@ -3,4 +3,4 @@ project(StellaTune)
 
 set(CMAKE_CXX_STANDARD 17)
 
-add_executable(StellaTune sample.cpp)
+add_executable(StellaTune StellaTune.cpp)
