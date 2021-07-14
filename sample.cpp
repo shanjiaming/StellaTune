@@ -26,6 +26,7 @@ string showAction(Action p) {
 }
 
 void double_search_distance(bool player);
+
 struct StateSaver {
     Place place_s[2];
     int boardnum_s[2];
@@ -50,7 +51,7 @@ struct StateSaver {
     }
 };
 
-int distmap[9][9];//每广搜一次广搜数据就会体现在distmap中。
+int distmap[9][9], doubledistmap[9][9];//每广搜一次广搜数据就会体现在distmap中。
 static constexpr Direction fourdirection[4] = {{1,  0},
                                                {-1, 0},
                                                {0,  1},
@@ -58,6 +59,8 @@ static constexpr Direction fourdirection[4] = {{1,  0},
 
 
 Place goodMove(bool player);
+
+Action goodAction(bool player, int deep);
 
 vector<pair<Action, pair<int, int>>> possibleBoard(int player = -1);
 
@@ -116,11 +119,11 @@ inline bool can_go(Place old, Direction move) {
         return false;
     if (move.first == 0) {
         int x = min(old.second, neo.second);
-        if (vertical_board[old.first][x] || vertical_board[old.first - 1][x]) return false;
+        if (vertical_board[old.first][x] || (old.first != 0 && vertical_board[old.first - 1][x])) return false;
     }
     if (move.second == 0) {
         int x = min(old.first, neo.first);
-        if (parallel_board[x][old.second] || parallel_board[x][old.second - 1]) return false;
+        if (parallel_board[x][old.second] || (old.second != 0 && parallel_board[x][old.second - 1])) return false;
     }
     return true;
 }
@@ -133,14 +136,12 @@ void translate(Action &act) {
     act.second = {x - act.second.first, x - act.second.second};
 }
 
-void double_search_distance(bool player){
+void double_search_distance(bool player) {
     //ResetClock;
 
     int dist = search_distance(player);
-    bool kill_protector[9][9] = {false};
-    kill_protector[place[player].first][place[player].second] = true;
-
-
+    memset(doubledistmap, 0x3f, sizeof(doubledistmap));
+    doubledistmap[place[player].first][place[player].second] = distmap[place[player].first][place[player].second];
     Place startPlace = place[player];
     queue<Place> q;
     q.push(startPlace);
@@ -148,17 +149,13 @@ void double_search_distance(bool player){
         startPlace = q.front(), q.pop();
         for (auto move : fourdirection) {
             Place neoPlace = Plus(startPlace, move);
-            if (!kill_protector[neoPlace.first][neoPlace.second] && can_go(startPlace, move) &&
+            if (doubledistmap[neoPlace.first][neoPlace.second] > 100 && can_go(startPlace, move) &&
                 distmap[neoPlace.first][neoPlace.second] == distmap[startPlace.first][startPlace.second] - 1) {
-                kill_protector[neoPlace.first][neoPlace.second] = true;
+                doubledistmap[neoPlace.first][neoPlace.second] = distmap[neoPlace.first][neoPlace.second];
                 q.push(neoPlace);
             }
         }
     }
-    for (int i = 0; i < 9; ++i)
-        for (int j = 0; j < 9; ++j)
-            if(!kill_protector[i][j])
-                distmap[i][j] = 0x3f3f3f3f;
 
 }
 
@@ -210,43 +207,44 @@ int son_calculateSituationValue(bool player, bool firstmove) {
     //cout << __FUNCTION__ << '\t' << __LINE__ << std::endl;
     StateSaver s;
     int score = 0;
-  /*  // todo 只算4步，之后把板折算了。
-    // todo 认为对面只会走路而不会防御性放板的想法是错误的。问题是，防御性放板本身并不增加距离，但是它首先预估阻碍了进攻板的放置（通过封闭空间等规则）（如果加了这步，就提前计算了下一步进攻板的位置，因此如果选择了走路的话就可以不计算下面进攻板的位置了），并且确保不会助纣为虐，看起来不好算
-    // todo 放板不会损伤自己，这导致了第一步的那块挡自己的板。
-    int costboard = 0;
-    if (firstmove)
-        while (boardnum[player] > 0 && costboard <= 1) {
-            pair<Action, int> place_board = goodBoard(player);//放完板
-            --boardnum[player];
-            ++costboard;
-            act(place_board.first, 0);
-            act({0, goodMove(!player)}, !player);
-            if (win() == !player) {
-                score -= 10000;
-                break;
-            }
-        }
-    else
-        while (boardnum[player] > 0 && costboard <= 1) {
-            act({0, goodMove(!player)}, !player);
-            if (win() == !player) {
-                score -= 10000;
-                break;
-            }
-            pair<Action, int> place_board = goodBoard(player);//放完板
-            --boardnum[player];
-            ++costboard;
-            act(place_board.first, 0);
-        }*/
+    /*  // todo 只算4步，之后把板折算了。
+      // todo 认为对面只会走路而不会防御性放板的想法是错误的。问题是，防御性放板本身并不增加距离，但是它首先预估阻碍了进攻板的放置（通过封闭空间等规则）（如果加了这步，就提前计算了下一步进攻板的位置，因此如果选择了走路的话就可以不计算下面进攻板的位置了），并且确保不会助纣为虐，看起来不好算
+      // todo 放板不会损伤自己，这导致了第一步的那块挡自己的板。
+      int costboard = 0;
+      if (firstmove)
+          while (boardnum[player] > 0 && costboard <= 1) {
+              pair<Action, int> place_board = goodBoard(player);//放完板
+              --boardnum[player];
+              ++costboard;
+              act(place_board.first, 0);
+              act({0, goodMove(!player)}, !player);
+              if (win() == !player) {
+                  score -= 10000;
+                  break;
+              }
+          }
+      else
+          while (boardnum[player] > 0 && costboard <= 1) {
+              act({0, goodMove(!player)}, !player);
+              if (win() == !player) {
+                  score -= 10000;
+                  break;
+              }
+              pair<Action, int> place_board = goodBoard(player);//放完板
+              --boardnum[player];
+              ++costboard;
+              act(place_board.first, 0);
+          }*/
     int distance1 = search_distance(!player);
-    if(distance1 == 0 || !firstmove && distance1 == 1) score -= 10000;
+    if (distance1 == 0 || !firstmove && distance1 == 1) score -= 10000;
     score += distance1;
     score += boardnum[player] * 1.5;
     //cout << "score = " << score << endl;
     return score;
 }
 
-int calculateSituationValue(bool player) {//FIXME player 是指该谁走了...吧。bug是，应用时我走完了，就直接评估了，而没有考虑他的先手，走完后再评估，即我现在单层应用时应设player=1当然如果把它走的分子全部展开也可以。
+int calculateSituationValue(
+        bool player) {//FIXME player 是指该谁走了...吧。bug是，应用时我走完了，就直接评估了，而没有考虑他的先手，走完后再评估，即我现在单层应用时应设player=1当然如果把它走的分子全部展开也可以。
 //cout << __FUNCTION__ << '\t' << __LINE__ << std::endl;
     //ResetClock;
     int wi = win();
@@ -258,23 +256,38 @@ int calculateSituationValue(bool player) {//FIXME player 是指该谁走了...�
     return a0 - a1;
 }
 
-Action goodAction(bool player) {
+Action goodAction(bool player, int deep) {
     //ResetClock;
 
     vector<Action> possible_action = possibleAction(player);
-    Action action;
-    int maxiact = -1000;
+    Action action = {100, {100, 100}};
+    int maxiact;
+    if(player == 0) maxiact = -1000000;
+    else maxiact = 1000000;
     for (const auto &aact : possible_action) {
         StateSaver s;
         //cout << "when action=" << showAction(aact)<<endl;
-        act(aact, 0);
-        int cSV = calculateSituationValue(1);
-        if (maxiact < cSV) {
-            maxiact = cSV;
-            action = aact;
+        act(aact, player);
+        int cSV;
+        if (deep == 1) cSV = calculateSituationValue(!player);
+        else {
+            act(goodAction(!player, deep - 1), !player);
+            cSV = calculateSituationValue(player);
+        }
+        if(player == 0) {
+            if (maxiact < cSV) {
+                maxiact = cSV;
+                action = aact;
+            }
+        }else{
+            if (maxiact > cSV) {
+                maxiact = cSV;
+                action = aact;
+            }
         }
     }
     return action;
+
 }
 
 Action action(Action loc) {
@@ -287,7 +300,7 @@ Action action(Action loc) {
     translate(loc);//现在保证你是0了。
     act(loc, 1);
     //cout <<endl<< "he acted"<<endl<<endl;
-    Action my_action = goodAction(0);
+    Action my_action = goodAction(0, 2);
     act(my_action, 0);
     translate(my_action);
 //    log();
@@ -340,7 +353,8 @@ int search_distance(bool player) {
         distmap[(player == 0) ? 0 : 8][i] = 0;
     }
     while (!q.empty()) {
-        startPlace = q.front(), q.pop();
+        startPlace = q.front();
+        q.pop();
         if (startPlace == place[player]) return distmap[startPlace.first][startPlace.second];
         for (auto move : fourdirection) {
             Place neoPlace = Plus(startPlace, move);
@@ -355,17 +369,18 @@ int search_distance(bool player) {
 }
 
 vector<pair<Action, pair<int, int>>> possibleBoard(int player) {
-    if(player != -1)
+    if (player != -1)
         double_search_distance(!player);
     vector<pair<Action, pair<int, int>>> possible_board;
     for (int i = 0; i < 8; ++i) {
         for (int j = 0; j < 8; ++j) {
-            if (vertical_board[i - 1][j] || vertical_board[i + 1][j] || vertical_board[i][j] ||
+            if ((i != 0 && vertical_board[i - 1][j]) || (i != 7 && vertical_board[i + 1][j]) || vertical_board[i][j] ||
                 parallel_board[i][j])
                 continue;
             //问：如何判断路径的完全封锁？
-            if(player!=-1){
-                if((distmap[i][j] > 100 || distmap[i][j+1] > 100) && (distmap[i+1][j] > 100 || distmap[i+1][j+1] > 100))
+            if (player != -1) {
+                if ((doubledistmap[i][j] > 100 || doubledistmap[i][j + 1] > 100) &&
+                    (doubledistmap[i + 1][j] > 100 || doubledistmap[i + 1][j + 1] > 100))
                     continue;
             }
             vertical_board[i][j] = true;//try put
@@ -384,11 +399,12 @@ vector<pair<Action, pair<int, int>>> possibleBoard(int player) {
 
     for (int i = 0; i < 8; ++i) {
         for (int j = 0; j < 8; ++j) {
-            if (parallel_board[i][j - 1] || parallel_board[i][j + 1] || parallel_board[i][j] ||
+            if ((j != 0 && parallel_board[i][j - 1]) || (j != 7 && parallel_board[i][j + 1]) || parallel_board[i][j] ||
                 vertical_board[i][j])
                 continue;
-            if(player!=-1){
-                if((distmap[i][j] > 100 || distmap[i+1][j] > 100) && (distmap[i][j+1] > 100 || distmap[i+1][j+1] > 100))
+            if (player != -1) {
+                if ((doubledistmap[i][j] > 100 || doubledistmap[i + 1][j] > 100) &&
+                    (doubledistmap[i][j + 1] > 100 || doubledistmap[i + 1][j + 1] > 100))
                     continue;
             }
             parallel_board[i][j] = true;//try put
