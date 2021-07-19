@@ -1,8 +1,9 @@
 #include "AIController.h"
 #include <utility>
 #include <bits/stdc++.h>
-//#include "time_tracer.h"
 
+#pragma GCC optimize("Ofast")
+//这不利于调试
 using namespace std;
 extern int ai_side;
 string ai_name = "Stellar Tune";
@@ -11,11 +12,16 @@ typedef pair<int, int> Place;
 typedef Place Direction;
 typedef pair<int, Place> Action;
 
+Action bestaction;
+
 Place place[2];
 int boardnum[2];
 bool board1[8][8] = {0}, board2[8][8] = {0};
+bool can_goboard1[9][8] = {0}, can_goboard2[8][9] = {0};
 #define vertical_board board1
 #define parallel_board board2
+
+#define Searchdeep 4
 
 string showPlace(Place p) {
     return "{" + to_string(p.first) + "," + to_string(p.second) + "}";
@@ -27,16 +33,21 @@ string showAction(Action p) {
 
 void double_search_distance(bool player);
 
+//TODO can_go 使用双表判定
+
 struct StateSaver {
     Place place_s[2];
     int boardnum_s[2];
     bool board1_s[8][8], board2_s[8][8];
+    bool can_goboard1_s[9][8], can_goboard2_s[8][9];
 
     StateSaver() {
         memcpy(place_s, place, sizeof(place));
         memcpy(boardnum_s, boardnum, sizeof(boardnum));
         memcpy(board1_s, board1, sizeof(board1));
         memcpy(board2_s, board2, sizeof(board2));
+        memcpy(can_goboard1_s, can_goboard1, sizeof(can_goboard1));
+        memcpy(can_goboard2_s, can_goboard2, sizeof(can_goboard2));
         //cout << "save place" << "place[0]=" << showPlace(place[0])<<endl;
         //cout << "save place" << "place[1]=" << showPlace(place[1])<<endl;
     }
@@ -46,6 +57,8 @@ struct StateSaver {
         memcpy(boardnum, boardnum_s, sizeof(boardnum));
         memcpy(board1, board1_s, sizeof(board1));
         memcpy(board2, board2_s, sizeof(board2));
+        memcpy(can_goboard1, can_goboard1_s, sizeof(can_goboard1));
+        memcpy(can_goboard2, can_goboard2_s, sizeof(can_goboard2));
         //cout << "load place" << "place[0]=" << showPlace(place[0])<<endl;
         //cout << "load place" << "place[1]=" << showPlace(place[1])<<endl;
     }
@@ -60,7 +73,7 @@ static constexpr Direction fourdirection[4] = {{1,  0},
 
 Place goodMove(bool player);
 
-Action goodAction(bool player, int deep);
+int CSV(bool player, int deep, int ub, int lb);
 
 vector<pair<Action, pair<int, int>>> possibleBoard(int player = -1);
 
@@ -114,16 +127,18 @@ inline Place Plus(Place old, Direction move) {
 
 inline bool can_go(Place old, Direction move) {
 
-    Place neo = Plus(old, move);
-    if (neo.first < 0 || neo.first > 8 || neo.second < 0 || neo.second > 8)
-        return false;
     if (move.first == 0) {
-        int x = min(old.second, neo.second);
-        if (vertical_board[old.first][x] || (old.first != 0 && vertical_board[old.first - 1][x])) return false;
-    }
-    if (move.second == 0) {
-        int x = min(old.first, neo.first);
-        if (parallel_board[x][old.second] || (old.second != 0 && parallel_board[x][old.second - 1])) return false;
+        if(move.second == 1){
+            if(old.second == 8 || can_goboard1[old.first][old.second]) return false;
+        }else{
+            if(old.second == 0 || can_goboard1[old.first][old.second-1]) return false;
+        }
+    }else{
+        if(move.first == 1){
+            if(old.first == 8 || can_goboard2[old.first][old.second]) return false;
+        }else{
+            if(old.first == 0 || can_goboard2[old.first-1][old.second]) return false;
+        }
     }
     return true;
 }
@@ -200,107 +215,141 @@ Place goodMove(bool player) {
     return goodmove;
 }
 
-int son_calculateSituationValue(bool player, bool firstmove) {
+int son_calculateSituationValue(bool player, int telldistance1) {
     //ResetClock;
 
-    //player指放板方，！player为走路方
-    //cout << __FUNCTION__ << '\t' << __LINE__ << std::endl;
     StateSaver s;
     int score = 0;
     /*  // todo 只算4步，之后把板折算了。
       // todo 认为对面只会走路而不会防御性放板的想法是错误的。问题是，防御性放板本身并不增加距离，但是它首先预估阻碍了进攻板的放置（通过封闭空间等规则）（如果加了这步，就提前计算了下一步进攻板的位置，因此如果选择了走路的话就可以不计算下面进攻板的位置了），并且确保不会助纣为虐，看起来不好算
       // todo 放板不会损伤自己，这导致了第一步的那块挡自己的板。
-      int costboard = 0;
-      if (firstmove)
-          while (boardnum[player] > 0 && costboard <= 1) {
-              pair<Action, int> place_board = goodBoard(player);//放完板
-              --boardnum[player];
-              ++costboard;
-              act(place_board.first, 0);
-              act({0, goodMove(!player)}, !player);
-              if (win() == !player) {
-                  score -= 10000;
-                  break;
-              }
-          }
-      else
-          while (boardnum[player] > 0 && costboard <= 1) {
-              act({0, goodMove(!player)}, !player);
-              if (win() == !player) {
-                  score -= 10000;
-                  break;
-              }
-              pair<Action, int> place_board = goodBoard(player);//放完板
-              --boardnum[player];
-              ++costboard;
-              act(place_board.first, 0);
-          }*/
-    int distance1 = search_distance(!player);
-    if (distance1 == 0 || !firstmove && distance1 == 1) score -= 10000;
-    score += distance1;
-    score += boardnum[player] * 1.5;
-    //cout << "score = " << score << endl;
+      */
+
+//    int distance1 = search_distance(!player);
+    score += ((telldistance1 != -1) ? telldistance1 : search_distance(!player));
+    score += boardnum[player];
+    if(boardnum[player] <= 5) score += (boardnum[player] - 5) >> 1;
+    if(boardnum[player] == 0) score -= 2;
     return score;
 }
 
 int calculateSituationValue(
-        bool player) {//FIXME player 是指该谁走了...吧。bug是，应用时我走完了，就直接评估了，而没有考虑他的先手，走完后再评估，即我现在单层应用时应设player=1当然如果把它走的分子全部展开也可以。
+        bool player, int telldistance0 = -1, int telldistance1 = -1) {//FIXME player 是指该谁走了...吧。bug是，应用时我走完了，就直接评估了，而没有考虑他的先手，走完后再评估，即我现在单层应用时应设player=1当然如果把它走的分子全部展开也可以。
 //cout << __FUNCTION__ << '\t' << __LINE__ << std::endl;
     //ResetClock;
     int wi = win();
     if (wi == 0) return 10000;
     if (wi == 1) return -10000;
+    if (player == 0 && place[0].first == 1 && can_go(place[0], {-1,0})) return 10000;
+    if (player == 1 && place[1].first == 7 && can_go(place[1], {1,0})) return -10000;
     //可以根据板的多少加置信度？
-    int a0 = son_calculateSituationValue(0, player == 0);
-    int a1 = son_calculateSituationValue(1, player == 1);
+    int a0 = son_calculateSituationValue(0,  telldistance1);
+    int a1 = son_calculateSituationValue(1, telldistance0);
     return a0 - a1;
 }
 
-Action goodAction(bool player, int deep) {
+
+int measure_with_try(Action aact, bool player, int deep, int ub, int lb){
+    StateSaver s;
+    act(aact, player);
+    if (win() == player) return (player == 0)?10000 : -10000;
+    if(deep == 0)    return calculateSituationValue(!player);
+    return CSV(!player, deep, ub, lb);
+}
+
+int CSV(bool player, int deep, int ub, int lb) {
     //ResetClock;
+    if(deep == 0)    return calculateSituationValue(player);
 
     vector<Action> possible_action = possibleAction(player);
-    Action action = {100, {100, 100}};
-    int maxiact;
-    if(player == 0) maxiact = -1000000;
-    else maxiact = 1000000;
-    for (const auto &aact : possible_action) {
-        StateSaver s;
-        //cout << "when action=" << showAction(aact)<<endl;
-        act(aact, player);
-        int cSV;
-        if (deep == 1) cSV = calculateSituationValue(!player);
-        else {
-            act(goodAction(!player, deep - 1), !player);
-            cSV = calculateSituationValue(player);
+    if (deep == 1) {
+        {
+            StateSaver s;
+            const Action& aact = {0,goodMove(player)};
+            act(aact, player);
+            int cSV = calculateSituationValue(!player);
+            if (player == 0) {
+                if (lb < cSV) {
+                    lb = cSV;
+                }
+            } else {
+                if (ub > cSV) {
+                    ub = cSV;
+                }
+            }
+            if (lb >= ub) return (lb+ub)>>1;//随便return一个值
         }
-        if(player == 0) {
-            if (maxiact < cSV) {
-                maxiact = cSV;
-                action = aact;
+        for (const auto &aact : possibleBoard(player)) {
+            StateSaver s;
+            int cSV = calculateSituationValue(!player, aact.second.first, aact.second.second);
+            if (player == 0) {
+                if (lb < cSV) {
+                    lb = cSV;
+                }
+            } else {
+                if (ub > cSV) {
+                    ub = cSV;
+                }
             }
-        }else{
-            if (maxiact > cSV) {
-                maxiact = cSV;
-                action = aact;
+            if (lb >= ub) return (lb+ub)>>1;
+        }
+
+    }
+    else {
+        //fixme：有没有这一段时间似乎差不多？
+        if(deep >= 2){
+            //将possible_action 用deep-2削到前10名
+            vector<pair<int, Action>> pairvector;
+            for (const auto &aact : possible_action) {
+                pairvector.push_back({measure_with_try(aact, player, max(0,deep-2), ub, lb),aact});
             }
+            if(player == 0)sort(pairvector.rbegin(),pairvector.rend());
+            else sort(pairvector.begin(),pairvector.end());
+            possible_action.clear();
+            for (int i = 0;; ++i) {
+                if(i != 0 && pairvector[i].first != pairvector[0].first) break;
+                possible_action.push_back(pairvector[i].second);
+            }
+        }
+        for (const auto &aact : possible_action) {
+            int val = measure_with_try(aact, player, deep - 1, ub,lb);
+            if (player == 0) {
+                if (lb < val) {
+                    lb = val;
+                    if(deep == Searchdeep){
+                        bestaction = aact;
+                    }
+                }
+            } else {
+                if (ub > val) {
+                    ub = val;
+                    if(deep == Searchdeep){
+                        bestaction = aact;
+                    }
+                }
+
+            }
+            if (lb >= ub) return (lb+ub)>>1;
         }
     }
-    return action;
-
+    return ((player == 0) ? lb : ub);
+    // todo 对deep == i， 先用deep == i-1 的结果跑一遍，然后取前10名跑。
 }
 
 Action action(Action loc) {
     //ResetClock;
 
+    cerr << loc.first << ' ' << loc.second.first << ' ' << loc.second.second << endl;
     if (loc.first == -1) {
         place[0] = {7, 4};
         return {0, {7, 4}};
     }
     translate(loc);//现在保证你是0了。
     act(loc, 1);
-    //cout <<endl<< "he acted"<<endl<<endl;
-    Action my_action = goodAction(0, 2);
+//    StartStopWatch;
+    CSV(0, Searchdeep, 1000, -1000);
+    Action my_action = bestaction;
+//    ResetClock;
     act(my_action, 0);
     translate(my_action);
 //    log();
@@ -374,7 +423,8 @@ vector<pair<Action, pair<int, int>>> possibleBoard(int player) {
     vector<pair<Action, pair<int, int>>> possible_board;
     for (int i = 0; i < 8; ++i) {
         for (int j = 0; j < 8; ++j) {
-            if ((i != 0 && vertical_board[i - 1][j]) || (i != 7 && vertical_board[i + 1][j]) || vertical_board[i][j] ||
+            if ((i != 0 && vertical_board[i - 1][j]) || (i != 7 && vertical_board[i + 1][j]) ||
+                vertical_board[i][j] ||
                 parallel_board[i][j])
                 continue;
             //问：如何判断路径的完全封锁？
@@ -384,12 +434,15 @@ vector<pair<Action, pair<int, int>>> possibleBoard(int player) {
                     continue;
             }
             vertical_board[i][j] = true;//try put
+            can_goboard1[i][j] = can_goboard1[i+1][j] = true;//try put
+
 
             int mydist_after_board = search_distance(0);
             int yourdist_after_board = search_distance(1);
             const bool blocked = mydist_after_board > 100 || yourdist_after_board > 100;
             //这里其实已经广搜把距离数据算出来了，能不能传回去呢？传到后两个数据，用结构体或pair什么的。
             vertical_board[i][j] = false;
+            can_goboard1[i][j] = can_goboard1[i+1][j] = false;//try put
             if (blocked) continue;
             possible_board.push_back({{1,                  {i, j}},
                                       {mydist_after_board, yourdist_after_board}});
@@ -399,7 +452,8 @@ vector<pair<Action, pair<int, int>>> possibleBoard(int player) {
 
     for (int i = 0; i < 8; ++i) {
         for (int j = 0; j < 8; ++j) {
-            if ((j != 0 && parallel_board[i][j - 1]) || (j != 7 && parallel_board[i][j + 1]) || parallel_board[i][j] ||
+            if ((j != 0 && parallel_board[i][j - 1]) || (j != 7 && parallel_board[i][j + 1]) ||
+                parallel_board[i][j] ||
                 vertical_board[i][j])
                 continue;
             if (player != -1) {
@@ -408,12 +462,14 @@ vector<pair<Action, pair<int, int>>> possibleBoard(int player) {
                     continue;
             }
             parallel_board[i][j] = true;//try put
+            can_goboard2[i][j] = can_goboard2[i][j+1] = true;//try put
 
             int mydist_after_board = search_distance(0);
             int yourdist_after_board = search_distance(1);
             const bool blocked = mydist_after_board > 100 || yourdist_after_board > 100;
             //这里其实已经广搜把距离数据算出来了，能不能传回去呢？传到后两个数据，用结构体或pair什么的。
             parallel_board[i][j] = false;
+            can_goboard2[i][j] = can_goboard2[i][j+1] = false;//try put
             if (blocked) continue;
             possible_board.push_back({{2,                  {i, j}},
                                       {mydist_after_board, yourdist_after_board}});
@@ -429,7 +485,16 @@ void act(Action loc, bool player) {
         place[player] = loc.second;
     else {
         --boardnum[player];
-        ((loc.first == 1) ? board1 : board2)[loc.second.first][loc.second.second] = true;
+        if (loc.first == 1){
+            board1[loc.second.first][loc.second.second] = true;
+            can_goboard1[loc.second.first][loc.second.second] = true;
+            can_goboard1[loc.second.first+1][loc.second.second] = true;
+
+        }else{
+            board2[loc.second.first][loc.second.second] = true;
+            can_goboard2[loc.second.first][loc.second.second] = true;
+            can_goboard2[loc.second.first][loc.second.second+1] = true;
+        }
     }
 }
 
